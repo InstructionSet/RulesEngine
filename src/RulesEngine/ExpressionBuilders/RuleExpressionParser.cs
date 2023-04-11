@@ -42,6 +42,28 @@ namespace RulesEngine.ExpressionBuilders
 
         }
 
+        public Func<T> Compile<T>(string expression)
+        {
+            var rtype = typeof(T);
+            if(rtype == typeof(object))
+            {
+                rtype = null;
+            }
+
+            string cacheKey = GetCacheKey(expression, null, typeof(T));
+
+            return _memoryCache.GetOrCreate(cacheKey, () => {
+                var e = Parse(expression, null, rtype);
+                if(rtype == null)
+                {
+                    e = Expression.Convert(e, typeof(T));
+                }
+
+                var lambda = Expression.Lambda<Func<T>>(e);
+                return lambda.CompileFast();
+            });
+        }
+
         public Func<object[], T> Compile<T>(string expression, RuleParameter[] ruleParams)
         {
             var rtype = typeof(T);
@@ -85,8 +107,16 @@ namespace RulesEngine.ExpressionBuilders
 
         public T Evaluate<T>(string expression, RuleParameter[] ruleParams)
         {   
-            var func = Compile<T>(expression, ruleParams);
-            return func(ruleParams.Select(c => c.Value).ToArray());
+            if (ruleParams is Array)
+            {
+                var func = Compile<T>(expression, ruleParams);
+                return func(ruleParams.Select(c => c.Value).ToArray());
+            }
+            else
+            {
+                var func = Compile<T>(expression);
+                return func();
+            }
         }
 
         private IEnumerable<Expression> CreateAssignedParameterExpression(RuleExpressionParameter[] ruleExpParams)
@@ -156,7 +186,10 @@ namespace RulesEngine.ExpressionBuilders
 
         private string GetCacheKey(string expression, RuleParameter[] ruleParameters, Type returnType)
         {
-            var paramKey = string.Join("|", ruleParameters.Select(c => c.Name + "_" + c.Type.ToString()));
+            string paramKey = null;
+            if (ruleParameters is not null)
+                paramKey = string.Join("|", ruleParameters.Select(c => c.Name + "_" + c.Type.ToString()));
+
             var returnTypeKey = returnType?.ToString() ?? "null";
             var combined = $"Expression:{expression}-Params:{paramKey}-ReturnType:{returnTypeKey}";
             return combined;
